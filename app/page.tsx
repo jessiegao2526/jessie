@@ -2,11 +2,11 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-type Holding = { secid:string; code:string; name:string; market:string; cost:number; qty:number };
+type Holding = { secid:string; code:string; name:string; market:string; cost:number };
 type Quote = { secid:string; code:string; name:string; price:number; prevClose:number; changePct:number; time:string };
 type Suggestion = { secid:string; code:string; name:string; market:string };
 
-const seed: Holding[] = [{ secid:"1.601985", code:"601985", name:"中国核电", market:"SH", cost:8.9, qty:1000 }];
+const seed: Holding[] = [{ secid:"1.601985", code:"601985", name:"中国核电", market:"SH", cost:8.9 }];
 const money = (n:number) => new Intl.NumberFormat("zh-CN",{style:"currency",currency:"CNY",minimumFractionDigits:2}).format(n);
 const signed = (n:number,suffix="%") => `${n>0?"+":n<0?"−":""}${Math.abs(n).toFixed(2)}${suffix}`;
 
@@ -18,7 +18,6 @@ export default function Home() {
   const [suggestions,setSuggestions] = useState<Suggestion[]>([]);
   const [selected,setSelected] = useState<Suggestion|null>(null);
   const [cost,setCost] = useState("");
-  const [qty,setQty] = useState("100");
   const [loading,setLoading] = useState(false);
   const [updated,setUpdated] = useState("正在连接行情");
   const [error,setError] = useState("");
@@ -47,36 +46,37 @@ export default function Home() {
   },[query,selected]);
 
   const stats=useMemo(()=>{
-    let value=0,costValue=0,today=0,prev=0;
-    holdings.forEach(h=>{const q=quotes[h.secid];if(!q)return;value+=q.price*h.qty;costValue+=h.cost*h.qty;today+=(q.price-q.prevClose)*h.qty;prev+=q.prevClose*h.qty});
-    return {value,profit:value-costValue,profitPct:costValue?(value-costValue)/costValue*100:0,today,todayPct:prev?today/prev*100:0};
+    const active=holdings.map(h=>({h,q:quotes[h.secid]})).filter(x=>x.q);
+    const profitPct=active.length?active.reduce((s,{h,q})=>s+(q.price-h.cost)/h.cost*100,0)/active.length:0;
+    const todayPct=active.length?active.reduce((s,{q})=>s+q.changePct,0)/active.length:0;
+    return {profitPct,todayPct};
   },[holdings,quotes]);
 
-  function close(){setModal(false);setQuery("");setSelected(null);setCost("");setQty("100");setSuggestions([])}
-  function add(){if(!selected||Number(cost)<=0||Number(qty)<=0)return;setHoldings(v=>[...v.filter(h=>h.secid!==selected.secid),{...selected,cost:Number(cost),qty:Number(qty)}]);close()}
+  function close(){setModal(false);setQuery("");setSelected(null);setCost("");setSuggestions([])}
+  function add(){if(!selected||Number(cost)<=0)return;setHoldings(v=>[...v.filter(h=>h.secid!==selected.secid),{...selected,cost:Number(cost)}]);close()}
   function choose(s:Suggestion){setSelected(s);setQuery(`${s.name}  ${s.code}.${s.market}`);setSuggestions([])}
 
   return <main>
-    <header className="topbar"><div className="brand"><span className="brandMark">↗</span><span>明势</span></div><div className="market"><i /> A股行情 <span>{loading?"更新中…":`更新于 ${updated}`}</span></div></header>
+    <header className="topbar"><div className="brand"><span className="brandMark">↗</span><span>鑫汇盈持仓</span></div><div className="market"><i /> A股行情 <span>{loading?"更新中…":`更新于 ${updated}`}</span></div></header>
     <section className="hero"><div><p className="eyebrow">PORTFOLIO PULSE</p><h1>看清每一次涨跌</h1><p className="subtitle">把关注的持仓放在一起，价格、涨幅和收益一目了然。</p></div><button className="primary" onClick={()=>setModal(true)}>＋ 添加个股</button></section>
     <section className="summary">
-      <div><span>持仓总收益</span><strong className={stats.profit>=0?"up":"down"}>{money(stats.profit)}</strong><small>{signed(stats.profitPct)}</small></div>
-      <div><span>持仓市值</span><strong>{money(stats.value)}</strong><small>{holdings.length} 个持仓</small></div>
-      <div><span>今日持仓收益</span><strong className={stats.today>=0?"up":"down"}>{money(stats.today)}</strong><small>{signed(stats.todayPct)} · 盘中</small></div>
+      <div><span>平均持仓收益</span><strong className={stats.profitPct>=0?"up":"down"}>{signed(stats.profitPct)}</strong><small>按个股等权计算</small></div>
+      <div><span>持仓数量</span><strong>{holdings.length}</strong><small>只股票</small></div>
+      <div><span>今日平均涨幅</span><strong className={stats.todayPct>=0?"up":"down"}>{signed(stats.todayPct)}</strong><small>实时行情 · 盘中</small></div>
     </section>
     <section className="card">
       <div className="cardHead"><div><h2>我的持仓</h2><p>{error||"每 15 秒自动刷新 · 公开行情数据仅供参考"}</p></div><button className="refresh" onClick={refresh} disabled={loading}>{loading?"刷新中":"↻ 刷新"}</button></div>
-      <div className="tableWrap"><table><thead><tr><th>代码 / 名称</th><th>成本</th><th>现价</th><th>持仓收益</th><th>当日涨幅</th><th>市值</th><th /></tr></thead><tbody>
-        {holdings.map(h=>{const q=quotes[h.secid];const price=q?.price||0;const gain=h.cost?(price-h.cost)/h.cost*100:0;const gainMoney=(price-h.cost)*h.qty;return <tr key={h.secid}><td><b>{q?.name||h.name}</b><span>{h.code}.{h.market}</span></td><td>{money(h.cost)}<span>{h.qty.toLocaleString()} 股</span></td><td>{q?<b>{money(price)}</b>:<span className="skeleton">获取中</span>}</td><td className={gainMoney>=0?"up":"down"}><b>{q?signed(gain):"—"}</b><span>{q?money(gainMoney):"—"}</span></td><td><em className={`pill ${(q?.changePct||0)>=0?"up":"down"}`}>{q?signed(q.changePct):"—"}</em></td><td><b>{q?money(price*h.qty):"—"}</b></td><td><button className="remove" aria-label={`删除${h.name}`} onClick={()=>setHoldings(v=>v.filter(x=>x.secid!==h.secid))}>×</button></td></tr>})}
-        {!holdings.length&&<tr><td colSpan={7} className="empty"><b>还没有持仓</b><span>添加一只股票，行情会自动出现在这里。</span><button onClick={()=>setModal(true)}>添加第一只</button></td></tr>}
+      <div className="tableWrap"><table><thead><tr><th>代码 / 名称</th><th>成本</th><th>现价</th><th>持仓收益</th><th>当日涨幅</th><th /></tr></thead><tbody>
+        {holdings.map(h=>{const q=quotes[h.secid];const price=q?.price||0;const gain=h.cost?(price-h.cost)/h.cost*100:0;return <tr key={h.secid}><td><b>{q?.name||h.name}</b><span>{h.code}.{h.market}</span></td><td>{money(h.cost)}</td><td>{q?<b>{money(price)}</b>:<span className="skeleton">获取中</span>}</td><td className={gain>=0?"up":"down"}><b>{q?signed(gain):"—"}</b></td><td><em className={`pill ${(q?.changePct||0)>=0?"up":"down"}`}>{q?signed(q.changePct):"—"}</em></td><td><button className="remove" aria-label={`删除${h.name}`} onClick={()=>setHoldings(v=>v.filter(x=>x.secid!==h.secid))}>×</button></td></tr>})}
+        {!holdings.length&&<tr><td colSpan={6} className="empty"><b>还没有持仓</b><span>添加一只股票，行情会自动出现在这里。</span><button onClick={()=>setModal(true)}>添加第一只</button></td></tr>}
       </tbody></table></div>
     </section>
     <footer>投资有风险，市场行情可能存在延迟，本看板不构成投资建议。</footer>
     {modal&&<div className="overlay" onMouseDown={e=>e.target===e.currentTarget&&close()}><div className="modal" role="dialog" aria-modal="true" aria-label="添加持仓"><button className="close" onClick={close}>×</button><p className="eyebrow">NEW POSITION</p><h2>添加一只持仓</h2><p className="modalLead">输入股票名称或 6 位代码，我们会自动匹配。</p>
       <label>股票</label><div className="searchBox"><span>⌕</span><input autoFocus value={query} placeholder="例如：中国核电 / 601985" onChange={e=>{setQuery(e.target.value);setSelected(null)}} /></div>
       {!!suggestions.length&&<div className="suggestions">{suggestions.map(s=><button key={s.secid} onClick={()=>choose(s)}><span><b>{s.name}</b><small>{s.code}.{s.market}</small></span><i>选择</i></button>)}</div>}
-      <div className="formRow"><div><label>持仓成本（元）</label><input type="number" min="0" step="0.01" value={cost} placeholder="8.90" onChange={e=>setCost(e.target.value)} /></div><div><label>持仓数量（股）</label><input type="number" min="1" step="100" value={qty} onChange={e=>setQty(e.target.value)} /></div></div>
-      <button className="submit" disabled={!selected||Number(cost)<=0||Number(qty)<=0} onClick={add}>添加到看板</button>
+      <div className="formRow"><div><label>持仓成本（元）</label><input type="number" min="0" step="0.01" value={cost} placeholder="8.90" onChange={e=>setCost(e.target.value)} /></div></div>
+      <button className="submit" disabled={!selected||Number(cost)<=0} onClick={add}>添加到看板</button>
     </div></div>}
   </main>
 }
