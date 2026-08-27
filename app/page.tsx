@@ -29,10 +29,15 @@ export default function Home() {
     if(!holdings.length) return;
     setLoading(true); setError("");
     try{
-      const res=await fetch(`/api/quotes?secids=${holdings.map(h=>h.secid).join(",")}`,{cache:"no-store"});
-      if(!res.ok) throw new Error();
-      const data:{quotes:Quote[]} = await res.json();
-      setQuotes(Object.fromEntries(data.quotes.map(q=>[q.secid,q])));
+      const liveQuotes:Quote[]=await Promise.all(holdings.map(async h=>{
+        const url=`https://push2.eastmoney.com/api/qt/stock/get?secid=${encodeURIComponent(h.secid)}&fields=f57,f58,f43,f60,f170&_=${Date.now()}`;
+        const res=await fetch(url);
+        if(!res.ok) throw new Error("quote unavailable");
+        const json=await res.json(); const d=json?.data;
+        if(!d||!Number.isFinite(Number(d.f43))) throw new Error("invalid quote");
+        return {secid:h.secid,code:d.f57,name:d.f58,price:Number(d.f43)/100,prevClose:Number(d.f60)/100,changePct:Number(d.f170)/100,time:new Date().toISOString()};
+      }));
+      setQuotes(Object.fromEntries(liveQuotes.map(q=>[q.secid,q])));
       setUpdated(new Date().toLocaleTimeString("zh-CN",{hour:"2-digit",minute:"2-digit",second:"2-digit"}));
     } catch { setError("行情连接暂时中断，稍后自动重试"); }
     finally { setLoading(false); }
@@ -41,6 +46,10 @@ export default function Home() {
 
   useEffect(()=>{
     if(selected||query.trim().length<2){setSuggestions([]);return}
+    if(/^\d{6}$/.test(query.trim())){
+      const code=query.trim(); const isShanghai=code.startsWith("5")||code.startsWith("6")||code.startsWith("9");
+      setSuggestions([{secid:`${isShanghai?"1":"0"}.${code}`,code,name:"按代码添加",market:isShanghai?"SH":"SZ"}]); return;
+    }
     const t=setTimeout(async()=>{try{const r=await fetch(`/api/search?q=${encodeURIComponent(query.trim())}`);const d=await r.json();setSuggestions(d.results||[])}catch{}},260);
     return()=>clearTimeout(t);
   },[query,selected]);
