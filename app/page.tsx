@@ -2,90 +2,74 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-type Holding = { secid:string; code:string; name:string; market:string; cost:number };
-type Quote = { secid:string; code:string; name:string; price:number; prevClose:number; changePct:number; time:string };
-type Suggestion = { secid:string; code:string; name:string; market:string };
+type Holding={secid:string;code:string;name:string;market:string;cost:number};
+type Portfolio={id:string;name:string;holdings:Holding[]};
+type Quote={secid:string;code:string;name:string;price:number;prevClose:number;changePct:number;time:string};
+type Suggestion={secid:string;code:string;name:string;market:string};
 
-const seed: Holding[] = [{ secid:"1.601985", code:"601985", name:"中国核电", market:"SH", cost:8.9 }];
-const money = (n:number) => new Intl.NumberFormat("zh-CN",{style:"currency",currency:"CNY",minimumFractionDigits:2}).format(n);
-const signed = (n:number,suffix="%") => `${n>0?"+":n<0?"−":""}${Math.abs(n).toFixed(2)}${suffix}`;
+const seed:Portfolio[]=[{id:"default",name:"默认组合",holdings:[{secid:"1.601985",code:"601985",name:"中国核电",market:"SH",cost:8.9}]}];
+const money=(n:number)=>new Intl.NumberFormat("zh-CN",{style:"currency",currency:"CNY",minimumFractionDigits:2}).format(n);
+const signed=(n:number)=>`${n>0?"+":n<0?"−":""}${Math.abs(n).toFixed(2)}%`;
+const localSuggestion=(value:string):Suggestion|null=>{if(!/^\d{6}$/.test(value))return null;const sh=/^[569]/.test(value);return{secid:`${sh?"1":"0"}.${value}`,code:value,name:"按代码查询",market:sh?"SH":"SZ"}};
 
-export default function Home() {
-  const [holdings,setHoldings] = useState<Holding[]>(seed);
-  const [quotes,setQuotes] = useState<Record<string,Quote>>({});
-  const [modal,setModal] = useState(false);
-  const [query,setQuery] = useState("");
-  const [suggestions,setSuggestions] = useState<Suggestion[]>([]);
-  const [selected,setSelected] = useState<Suggestion|null>(null);
-  const [cost,setCost] = useState("");
-  const [loading,setLoading] = useState(false);
-  const [updated,setUpdated] = useState("正在连接行情");
-  const [error,setError] = useState("");
+async function searchStocks(query:string){
+  const exact=localSuggestion(query); if(exact)return[exact];
+  const r=await fetch(`/api/search?q=${encodeURIComponent(query)}`);if(!r.ok)throw new Error();const d=await r.json();return(d.results||[]) as Suggestion[];
+}
+async function fetchQuote(secid:string,extended=false){
+  const fields=`f57,f58,f43,f60,f170${extended?",f127,f129":""}`;
+  const r=await fetch(`https://push2.eastmoney.com/api/qt/stock/get?secid=${encodeURIComponent(secid)}&fields=${fields}&_=${Date.now()}`);
+  if(!r.ok)throw new Error();const j=await r.json();if(!j?.data)throw new Error();return j.data;
+}
 
-  useEffect(()=>{const saved=localStorage.getItem("mingshi-holdings"); if(saved){try{setHoldings(JSON.parse(saved))}catch{}}},[]);
-  useEffect(()=>{localStorage.setItem("mingshi-holdings",JSON.stringify(holdings))},[holdings]);
+export default function Home(){
+  const[portfolios,setPortfolios]=useState<Portfolio[]>(seed);const[activeId,setActiveId]=useState("default");
+  const[quotes,setQuotes]=useState<Record<string,Quote>>({});const[loading,setLoading]=useState(false);const[updated,setUpdated]=useState("正在连接行情");const[error,setError]=useState("");
+  const[holdingModal,setHoldingModal]=useState(false);const[groupModal,setGroupModal]=useState<"new"|"rename"|null>(null);const[groupName,setGroupName]=useState("");
+  const[query,setQuery]=useState("");const[suggestions,setSuggestions]=useState<Suggestion[]>([]);const[selected,setSelected]=useState<Suggestion|null>(null);const[cost,setCost]=useState("");
+  const[speechQuery,setSpeechQuery]=useState("");const[speechSuggestions,setSpeechSuggestions]=useState<Suggestion[]>([]);const[speechSelected,setSpeechSelected]=useState<Suggestion|null>(null);const[speech,setSpeech]=useState("");const[speechLoading,setSpeechLoading]=useState(false);const[speechError,setSpeechError]=useState("");
+  const active=portfolios.find(p=>p.id===activeId)||portfolios[0];const holdings=active?.holdings||[];
 
-  const refresh = useCallback(async()=>{
-    if(!holdings.length) return;
-    setLoading(true); setError("");
-    try{
-      const liveQuotes:Quote[]=await Promise.all(holdings.map(async h=>{
-        const url=`https://push2.eastmoney.com/api/qt/stock/get?secid=${encodeURIComponent(h.secid)}&fields=f57,f58,f43,f60,f170&_=${Date.now()}`;
-        const res=await fetch(url);
-        if(!res.ok) throw new Error("quote unavailable");
-        const json=await res.json(); const d=json?.data;
-        if(!d||!Number.isFinite(Number(d.f43))) throw new Error("invalid quote");
-        return {secid:h.secid,code:d.f57,name:d.f58,price:Number(d.f43)/100,prevClose:Number(d.f60)/100,changePct:Number(d.f170)/100,time:new Date().toISOString()};
-      }));
-      setQuotes(Object.fromEntries(liveQuotes.map(q=>[q.secid,q])));
-      setUpdated(new Date().toLocaleTimeString("zh-CN",{hour:"2-digit",minute:"2-digit",second:"2-digit"}));
-    } catch { setError("行情连接暂时中断，稍后自动重试"); }
-    finally { setLoading(false); }
-  },[holdings]);
-  useEffect(()=>{refresh(); const t=setInterval(refresh,15000); return()=>clearInterval(t)},[refresh]);
+  useEffect(()=>{try{const saved=localStorage.getItem("xinhuiying-portfolios");if(saved){const parsed=JSON.parse(saved);setPortfolios(parsed);setActiveId(parsed[0]?.id||"default");return}const old=localStorage.getItem("mingshi-holdings");if(old)setPortfolios([{id:"default",name:"默认组合",holdings:JSON.parse(old)}])}catch{}},[]);
+  useEffect(()=>{localStorage.setItem("xinhuiying-portfolios",JSON.stringify(portfolios))},[portfolios]);
 
-  useEffect(()=>{
-    if(selected||query.trim().length<2){setSuggestions([]);return}
-    if(/^\d{6}$/.test(query.trim())){
-      const code=query.trim(); const isShanghai=code.startsWith("5")||code.startsWith("6")||code.startsWith("9");
-      setSuggestions([{secid:`${isShanghai?"1":"0"}.${code}`,code,name:"按代码添加",market:isShanghai?"SH":"SZ"}]); return;
-    }
-    const t=setTimeout(async()=>{try{const r=await fetch(`/api/search?q=${encodeURIComponent(query.trim())}`);const d=await r.json();setSuggestions(d.results||[])}catch{}},260);
-    return()=>clearTimeout(t);
-  },[query,selected]);
+  const allHoldings=useMemo(()=>Array.from(new Map(portfolios.flatMap(p=>p.holdings).map(h=>[h.secid,h])).values()),[portfolios]);
+  const refresh=useCallback(async()=>{if(!allHoldings.length)return;setLoading(true);setError("");try{const live=await Promise.all(allHoldings.map(async h=>{const d=await fetchQuote(h.secid);return{secid:h.secid,code:d.f57,name:d.f58,price:Number(d.f43)/100,prevClose:Number(d.f60)/100,changePct:Number(d.f170)/100,time:new Date().toISOString()} as Quote}));setQuotes(Object.fromEntries(live.map(q=>[q.secid,q])));setUpdated(new Date().toLocaleTimeString("zh-CN",{hour:"2-digit",minute:"2-digit",second:"2-digit"}))}catch{setError("行情连接暂时中断，稍后自动重试")}finally{setLoading(false)}},[allHoldings]);
+  useEffect(()=>{refresh();const t=setInterval(refresh,15000);return()=>clearInterval(t)},[refresh]);
 
-  const stats=useMemo(()=>{
-    const active=holdings.map(h=>({h,q:quotes[h.secid]})).filter(x=>x.q);
-    const profitPct=active.length?active.reduce((s,{h,q})=>s+(q.price-h.cost)/h.cost*100,0)/active.length:0;
-    const todayPct=active.length?active.reduce((s,{q})=>s+q.changePct,0)/active.length:0;
-    return {profitPct,todayPct};
-  },[holdings,quotes]);
+  useEffect(()=>{if(selected||query.trim().length<2){setSuggestions([]);return}const t=setTimeout(()=>searchStocks(query.trim()).then(setSuggestions).catch(()=>setSuggestions([])),260);return()=>clearTimeout(t)},[query,selected]);
+  useEffect(()=>{if(speechSelected||speechQuery.trim().length<2){setSpeechSuggestions([]);return}const t=setTimeout(()=>searchStocks(speechQuery.trim()).then(setSpeechSuggestions).catch(()=>setSpeechSuggestions([])),260);return()=>clearTimeout(t)},[speechQuery,speechSelected]);
 
-  function close(){setModal(false);setQuery("");setSelected(null);setCost("");setSuggestions([])}
-  function add(){if(!selected||Number(cost)<=0)return;setHoldings(v=>[...v.filter(h=>h.secid!==selected.secid),{...selected,cost:Number(cost)}]);close()}
-  function choose(s:Suggestion){setSelected(s);setQuery(`${s.name}  ${s.code}.${s.market}`);setSuggestions([])}
+  const stats=useMemo(()=>{const rows=holdings.map(h=>({h,q:quotes[h.secid]})).filter(x=>x.q);return{profitPct:rows.length?rows.reduce((s,{h,q})=>s+(q.price-h.cost)/h.cost*100,0)/rows.length:0,todayPct:rows.length?rows.reduce((s,{q})=>s+q.changePct,0)/rows.length:0}},[holdings,quotes]);
+  function updateActive(fn:(items:Holding[])=>Holding[]){setPortfolios(ps=>ps.map(p=>p.id===activeId?{...p,holdings:fn(p.holdings)}:p))}
+  function closeHolding(){setHoldingModal(false);setQuery("");setSelected(null);setCost("");setSuggestions([])}
+  function addHolding(){if(!selected||Number(cost)<=0)return;updateActive(items=>[...items.filter(h=>h.secid!==selected.secid),{...selected,name:selected.name==="按代码查询"?selected.code:selected.name,cost:Number(cost)}]);closeHolding()}
+  function saveGroup(){const name=groupName.trim();if(!name)return;if(groupModal==="new"){const id=`p-${Date.now()}`;setPortfolios(ps=>[...ps,{id,name,holdings:[]}]);setActiveId(id)}else setPortfolios(ps=>ps.map(p=>p.id===activeId?{...p,name}:p));setGroupModal(null);setGroupName("")}
+  function deleteGroup(){if(portfolios.length<=1)return;const next=portfolios.filter(p=>p.id!==activeId);setPortfolios(next);setActiveId(next[0].id)}
+  async function generateSpeech(){if(!speechSelected)return;setSpeechLoading(true);setSpeechError("");try{const d=await fetchQuote(speechSelected.secid,true);const concepts=String(d.f129||"").split(",").filter(Boolean);const theme=(concepts[0]||d.f127||"行业景气").slice(0,8);const price=Number(d.f43)/100;setSpeech(`${d.f58}（${d.f57}）：受益于${theme}，建仓一成，止损价建议设为${(price*.85).toFixed(2)}元左右`);setSpeechQuery(`${d.f58}  ${d.f57}`)}catch{setSpeechError("暂时无法取得该股票行情，请稍后重试")}finally{setSpeechLoading(false)}}
+  function copySpeech(){if(speech)navigator.clipboard.writeText(speech)}
 
   return <main>
-    <header className="topbar"><div className="brand"><span className="brandMark">↗</span><span>鑫汇盈持仓</span></div><div className="market"><i /> A股行情 <span>{loading?"更新中…":`更新于 ${updated}`}</span></div></header>
-    <section className="hero"><div><p className="eyebrow">PORTFOLIO PULSE</p><h1>看清每一次涨跌</h1><p className="subtitle">把关注的持仓放在一起，价格、涨幅和收益一目了然。</p></div><button className="primary" onClick={()=>setModal(true)}>＋ 添加个股</button></section>
-    <section className="summary">
-      <div><span>平均持仓收益</span><strong className={stats.profitPct>=0?"up":"down"}>{signed(stats.profitPct)}</strong><small>按个股等权计算</small></div>
-      <div><span>持仓数量</span><strong>{holdings.length}</strong><small>只股票</small></div>
-      <div><span>今日平均涨幅</span><strong className={stats.todayPct>=0?"up":"down"}>{signed(stats.todayPct)}</strong><small>实时行情 · 盘中</small></div>
-    </section>
-    <section className="card">
-      <div className="cardHead"><div><h2>我的持仓</h2><p>{error||"每 15 秒自动刷新 · 公开行情数据仅供参考"}</p></div><button className="refresh" onClick={refresh} disabled={loading}>{loading?"刷新中":"↻ 刷新"}</button></div>
-      <div className="tableWrap"><table><thead><tr><th>代码 / 名称</th><th>成本</th><th>现价</th><th>持仓收益</th><th>当日涨幅</th><th /></tr></thead><tbody>
-        {holdings.map(h=>{const q=quotes[h.secid];const price=q?.price||0;const gain=h.cost?(price-h.cost)/h.cost*100:0;return <tr key={h.secid}><td><b>{q?.name||h.name}</b><span>{h.code}.{h.market}</span></td><td>{money(h.cost)}</td><td>{q?<b>{money(price)}</b>:<span className="skeleton">获取中</span>}</td><td className={gain>=0?"up":"down"}><b>{q?signed(gain):"—"}</b></td><td><em className={`pill ${(q?.changePct||0)>=0?"up":"down"}`}>{q?signed(q.changePct):"—"}</em></td><td><button className="remove" aria-label={`删除${h.name}`} onClick={()=>setHoldings(v=>v.filter(x=>x.secid!==h.secid))}>×</button></td></tr>})}
-        {!holdings.length&&<tr><td colSpan={6} className="empty"><b>还没有持仓</b><span>添加一只股票，行情会自动出现在这里。</span><button onClick={()=>setModal(true)}>添加第一只</button></td></tr>}
-      </tbody></table></div>
-    </section>
-    <footer>投资有风险，市场行情可能存在延迟，本看板不构成投资建议。</footer>
-    {modal&&<div className="overlay" onMouseDown={e=>e.target===e.currentTarget&&close()}><div className="modal" role="dialog" aria-modal="true" aria-label="添加持仓"><button className="close" onClick={close}>×</button><p className="eyebrow">NEW POSITION</p><h2>添加一只持仓</h2><p className="modalLead">输入股票名称或 6 位代码，我们会自动匹配。</p>
-      <label>股票</label><div className="searchBox"><span>⌕</span><input autoFocus value={query} placeholder="例如：中国核电 / 601985" onChange={e=>{setQuery(e.target.value);setSelected(null)}} /></div>
-      {!!suggestions.length&&<div className="suggestions">{suggestions.map(s=><button key={s.secid} onClick={()=>choose(s)}><span><b>{s.name}</b><small>{s.code}.{s.market}</small></span><i>选择</i></button>)}</div>}
-      <div className="formRow"><div><label>持仓成本（元）</label><input type="number" min="0" step="0.01" value={cost} placeholder="8.90" onChange={e=>setCost(e.target.value)} /></div></div>
-      <button className="submit" disabled={!selected||Number(cost)<=0} onClick={add}>添加到看板</button>
-    </div></div>}
+    <header className="topbar"><div className="brand"><span className="brandMark">↗</span><span>鑫汇盈</span></div><div className="market"><i/>A股行情 <span>{loading?"更新中…":`更新于 ${updated}`}</span></div></header>
+
+    <section className="generator"><div className="generatorCopy"><p className="eyebrow">XINHUIYING SCRIPT</p><h1>鑫汇盈话术生成器</h1><p>输入股票名称或代码，即刻生成简洁的买入逻辑与参考止损价。</p></div><div className="generatorPanel">
+      <label>股票名称 / 股票代码</label><div className="generatorInput"><span>⌕</span><input value={speechQuery} placeholder="例如：中国核电 / 601985" onChange={e=>{setSpeechQuery(e.target.value);setSpeechSelected(null);setSpeech("")}}/><button disabled={!speechSelected||speechLoading} onClick={generateSpeech}>{speechLoading?"生成中":"生成话术"}</button></div>
+      {!!speechSuggestions.length&&<div className="suggestions generatorSuggestions">{speechSuggestions.map(s=><button key={s.secid} onClick={()=>{setSpeechSelected(s);setSpeechQuery(`${s.name}  ${s.code}.${s.market}`);setSpeechSuggestions([])}}><span><b>{s.name}</b><small>{s.code}.{s.market}</small></span><i>选择</i></button>)}</div>}
+      {speechError&&<p className="formError">{speechError}</p>}{speech&&<div className="speechResult"><span>已生成</span><p>{speech}</p><button onClick={copySpeech}>复制话术</button></div>}
+      <small className="generatorNote">止损参考价按实时现价的 85% 计算 · 内容仅供研究交流</small>
+    </div></section>
+
+    <div className="sectionDivider"><span>PORTFOLIO</span></div>
+    <section className="hero portfolioHero"><div><p className="eyebrow">PORTFOLIO PULSE</p><h1>鑫汇盈持仓</h1><p className="subtitle">用不同组合管理策略，同一股票可记录不同成本。</p></div><button className="primary" onClick={()=>setHoldingModal(true)}>＋ 添加个股</button></section>
+    <section className="portfolioBar"><div className="portfolioTabs">{portfolios.map(p=><button key={p.id} className={p.id===activeId?"active":""} onClick={()=>setActiveId(p.id)}>{p.name}<span>{p.holdings.length}</span></button>)}<button className="newGroup" onClick={()=>{setGroupName("");setGroupModal("new")}}>＋ 新建组合</button></div><div className="portfolioActions"><button onClick={()=>{setGroupName(active.name);setGroupModal("rename")}}>重命名</button><button disabled={portfolios.length<=1} onClick={deleteGroup}>删除组合</button></div></section>
+    <section className="summary"><div><span>{active.name} · 平均持仓收益</span><strong className={stats.profitPct>=0?"up":"down"}>{signed(stats.profitPct)}</strong><small>按个股等权计算</small></div><div><span>持仓数量</span><strong>{holdings.length}</strong><small>只股票</small></div><div><span>今日平均涨幅</span><strong className={stats.todayPct>=0?"up":"down"}>{signed(stats.todayPct)}</strong><small>实时行情 · 盘中</small></div></section>
+    <section className="card"><div className="cardHead"><div><h2>{active.name}</h2><p>{error||"每 15 秒自动刷新 · 公开行情数据仅供参考"}</p></div><button className="refresh" onClick={refresh} disabled={loading}>{loading?"刷新中":"↻ 刷新"}</button></div><div className="tableWrap"><table><thead><tr><th>代码 / 名称</th><th>成本</th><th>现价</th><th>持仓收益</th><th>当日涨幅</th><th/></tr></thead><tbody>
+      {holdings.map(h=>{const q=quotes[h.secid];const price=q?.price||0;const gain=h.cost?(price-h.cost)/h.cost*100:0;return <tr key={h.secid}><td><b>{q?.name||h.name}</b><span>{h.code}.{h.market}</span></td><td>{money(h.cost)}</td><td>{q?<b>{money(price)}</b>:<span className="skeleton">获取中</span>}</td><td className={gain>=0?"up":"down"}><b>{q?signed(gain):"—"}</b></td><td><em className={`pill ${(q?.changePct||0)>=0?"up":"down"}`}>{q?signed(q.changePct):"—"}</em></td><td><button className="remove" aria-label={`删除${h.name}`} onClick={()=>updateActive(items=>items.filter(x=>x.secid!==h.secid))}>×</button></td></tr>})}
+      {!holdings.length&&<tr><td colSpan={6} className="empty"><b>这个组合还没有持仓</b><span>同一股票可以在不同组合记录不同成本。</span><button onClick={()=>setHoldingModal(true)}>添加第一只</button></td></tr>}
+    </tbody></table></div></section>
+    <footer>投资有风险，市场行情可能存在延迟，本页面不构成投资建议。</footer>
+
+    {holdingModal&&<div className="overlay" onMouseDown={e=>e.target===e.currentTarget&&closeHolding()}><div className="modal" role="dialog" aria-modal="true"><button className="close" onClick={closeHolding}>×</button><p className="eyebrow">NEW POSITION</p><h2>添加到「{active.name}」</h2><p className="modalLead">输入股票名称或 6 位代码，我们会自动匹配。</p><label>股票</label><div className="searchBox"><span>⌕</span><input autoFocus value={query} placeholder="例如：中国核电 / 601985" onChange={e=>{setQuery(e.target.value);setSelected(null)}}/></div>{!!suggestions.length&&<div className="suggestions">{suggestions.map(s=><button key={s.secid} onClick={()=>{setSelected(s);setQuery(`${s.name}  ${s.code}.${s.market}`);setSuggestions([])}}><span><b>{s.name}</b><small>{s.code}.{s.market}</small></span><i>选择</i></button>)}</div>}<div className="formRow"><div><label>持仓成本（元）</label><input type="number" min="0" step="0.01" value={cost} placeholder="8.90" onChange={e=>setCost(e.target.value)}/></div></div><button className="submit" disabled={!selected||Number(cost)<=0} onClick={addHolding}>添加到组合</button></div></div>}
+    {groupModal&&<div className="overlay" onMouseDown={e=>e.target===e.currentTarget&&setGroupModal(null)}><div className="modal smallModal" role="dialog" aria-modal="true"><button className="close" onClick={()=>setGroupModal(null)}>×</button><p className="eyebrow">PORTFOLIO GROUP</p><h2>{groupModal==="new"?"新建自选组合":"重命名组合"}</h2><p className="modalLead">例如：凤山、武林、稳健组合</p><label>组合名称</label><div className="searchBox"><input autoFocus maxLength={12} value={groupName} placeholder="输入组合名称" onChange={e=>setGroupName(e.target.value)} onKeyDown={e=>e.key==="Enter"&&saveGroup()}/></div><button className="submit" disabled={!groupName.trim()} onClick={saveGroup}>保存组合</button></div></div>}
   </main>
 }
