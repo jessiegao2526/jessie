@@ -10,10 +10,10 @@ type Suggestion={secid:string;code:string;name:string;market:string};
 const seed:Portfolio[]=[{id:"default",name:"默认组合",holdings:[{secid:"1.601985",code:"601985",name:"中国核电",market:"SH",cost:8.9}]}];
 const money=(n:number)=>new Intl.NumberFormat("zh-CN",{style:"currency",currency:"CNY",minimumFractionDigits:2}).format(n);
 const signed=(n:number)=>`${n>0?"+":n<0?"−":""}${Math.abs(n).toFixed(2)}%`;
-const localSuggestion=(value:string):Suggestion|null=>{if(!/^\d{6}$/.test(value))return null;const sh=/^[569]/.test(value);return{secid:`${sh?"1":"0"}.${value}`,code:value,name:"按代码查询",market:sh?"SH":"SZ"}};
+const stockCode=(value:string)=>value.trim().toUpperCase().match(/^(\d{6})(?:\.(SH|SZ))?$/)?.[1]||null;
 
 async function searchStocks(query:string){
-  const exact=localSuggestion(query); if(exact)return[exact];
+  const exact=stockCode(query);if(exact){const suffix=query.trim().toUpperCase().endsWith(".SZ")?"SZ":query.trim().toUpperCase().endsWith(".SH")?"SH":/^[569]/.test(exact)?"SH":"SZ";const secid=`${suffix==="SH"?"1":"0"}.${exact}`;try{const d=await fetchQuote(secid);return[{secid,code:d.f57||exact,name:d.f58||exact,market:suffix}]}catch{}}
   const r=await fetch(`/api/search?q=${encodeURIComponent(query)}`);if(!r.ok)throw new Error();const d=await r.json();return(d.results||[]) as Suggestion[];
 }
 async function fetchQuote(secid:string,extended=false){
@@ -38,8 +38,8 @@ export default function Home(){
   const refresh=useCallback(async()=>{if(!allHoldings.length)return;setLoading(true);setError("");try{const live=await Promise.all(allHoldings.map(async h=>{const d=await fetchQuote(h.secid);return{secid:h.secid,code:d.f57,name:d.f58,price:Number(d.f43)/100,prevClose:Number(d.f60)/100,changePct:Number(d.f170)/100,time:new Date().toISOString()} as Quote}));setQuotes(Object.fromEntries(live.map(q=>[q.secid,q])));setUpdated(new Date().toLocaleTimeString("zh-CN",{hour:"2-digit",minute:"2-digit",second:"2-digit"}))}catch{setError("行情连接暂时中断，稍后自动重试")}finally{setLoading(false)}},[allHoldings]);
   useEffect(()=>{refresh();const t=setInterval(refresh,15000);return()=>clearInterval(t)},[refresh]);
 
-  useEffect(()=>{if(selected||query.trim().length<2){setSuggestions([]);return}const t=setTimeout(()=>searchStocks(query.trim()).then(setSuggestions).catch(()=>setSuggestions([])),260);return()=>clearTimeout(t)},[query,selected]);
-  useEffect(()=>{if(speechSelected||speechQuery.trim().length<2){setSpeechSuggestions([]);return}const t=setTimeout(()=>searchStocks(speechQuery.trim()).then(setSpeechSuggestions).catch(()=>setSpeechSuggestions([])),260);return()=>clearTimeout(t)},[speechQuery,speechSelected]);
+  useEffect(()=>{if(selected||query.trim().length<2){setSuggestions([]);return}const raw=query.trim();const t=setTimeout(()=>searchStocks(raw).then(items=>{const code=stockCode(raw);if(code&&items[0]?.code===code){setSelected(items[0]);setQuery(`${items[0].name}  ${items[0].code}.${items[0].market}`);setSuggestions([])}else setSuggestions(items)}).catch(()=>setSuggestions([])),260);return()=>clearTimeout(t)},[query,selected]);
+  useEffect(()=>{if(speechSelected||speechQuery.trim().length<2){setSpeechSuggestions([]);return}const raw=speechQuery.trim();const t=setTimeout(()=>searchStocks(raw).then(items=>{const code=stockCode(raw);if(code&&items[0]?.code===code){setSpeechSelected(items[0]);setSpeechQuery(`${items[0].name}  ${items[0].code}.${items[0].market}`);setSpeechSuggestions([])}else setSpeechSuggestions(items)}).catch(()=>setSpeechSuggestions([])),260);return()=>clearTimeout(t)},[speechQuery,speechSelected]);
 
   const stats=useMemo(()=>{const rows=holdings.map(h=>({h,q:quotes[h.secid]})).filter(x=>x.q);return{profitPct:rows.length?rows.reduce((s,{h,q})=>s+(q.price-h.cost)/h.cost*100,0)/rows.length:0,todayPct:rows.length?rows.reduce((s,{q})=>s+q.changePct,0)/rows.length:0}},[holdings,quotes]);
   function updateActive(fn:(items:Holding[])=>Holding[]){setPortfolios(ps=>ps.map(p=>p.id===activeId?{...p,holdings:fn(p.holdings)}:p))}
