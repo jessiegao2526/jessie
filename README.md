@@ -2,6 +2,12 @@
 
 一个面向 A 股的轻量持仓看板，包含智能话术生成器、多自选组合、股票代码与名称自动匹配、实时行情及当日涨幅展示。
 
+在线访问：<https://xinhuiying-stock-dashboard.jessiegao2526.workers.dev>
+
+GitHub Pages 入口：<https://jessiegao2526.github.io/jessie/>
+
+> `workers.dev` 在部分中国大陆网络中可能受到 DNS 污染或访问不稳定。面向国内用户长期分享时，建议在 Cloudflare 中绑定自己的域名。
+
 ## 主要功能
 
 - 输入股票名称或 6 位代码自动匹配证券
@@ -27,7 +33,7 @@ pnpm build
 pnpm deploy
 ```
 
-生产环境运行于 Cloudflare Workers。配置见 [`wrangler.jsonc`](./wrangler.jsonc)。
+生产环境运行于 Cloudflare Workers，公开地址无需登录。配置见 [`wrangler.jsonc`](./wrangler.jsonc)。
 
 ## 数据说明
 
