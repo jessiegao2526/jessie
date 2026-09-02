@@ -4,6 +4,8 @@
 
 在线访问：<https://xinhuiying-stock-dashboard.jessiegao2526.workers.dev>
 
+GitHub Pages 入口：<https://jessiegao2526.github.io/jessie/>
+
 > `workers.dev` 在部分中国大陆网络中可能受到 DNS 污染或访问不稳定。面向国内用户长期分享时，建议在 Cloudflare 中绑定自己的域名。
 
 ## 主要功能
