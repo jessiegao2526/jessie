@@ -1,5 +1,12 @@
 # 鑫汇盈股票看板
 
+## 双站点部署
+
+- 腾讯云独立站：固定规则话术生成器与持仓看板，不加载或展示 DeepSeek 功能。
+- Cloudflare Workers 独立站：DeepSeek Flash 智能话术生成器，仅作为个人入口使用。
+
+两站共用行情、企业主营资料和界面代码，但 AI 页面与生成接口只在 Cloudflare Worker 入口开放；DeepSeek API Key 必须使用 Worker Secret 或服务器环境变量配置，禁止提交到 GitHub。
+
 一个面向 A 股的轻量持仓看板，包含智能话术生成器、多自选组合、股票代码与名称自动匹配、实时行情及当日涨幅展示。
 
 在线访问：<https://xinhuiying-stock-dashboard.jessiegao2526.workers.dev>

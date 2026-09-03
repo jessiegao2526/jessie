@@ -23,6 +23,67 @@ function aiCacheKey(input:AiGenerateInput){
   return `xinhuiying-ai:${input.code}:${(hash>>>0).toString(36)}`;
 }
 
+const verifiedRule:Record<string,string>={
+  "300394":"光器件领先，受益AI算力扩容",
+  "600667":"洁净室工程领先，受益晶圆厂扩产",
+  "601985":"核电运营龙头，受益核准提速",
+};
+const businessRules:Array<[RegExp,string]>=[
+  [/(洁净室|洁净工程|电子工程|晶圆厂工程)/,"洁净室工程领先，受益晶圆厂扩产"],
+  [/(光模块|光器件|光通信|光电子)/,"深耕光通信器件，受益AI算力扩容"],
+  [/(核电运营|核能发电|核电发电)/,"聚焦核电运营，受益机组核准提速"],
+  [/(封装测试|集成电路封测|先进封装)/,"半导体封测领先，受益国产替代"],
+  [/(半导体设备|刻蚀|薄膜沉积|清洗设备)/,"聚焦半导体设备，受益国产替代"],
+  [/(存储芯片|存储器|DRAM|NAND)/i,"深耕存储芯片，受益周期复苏"],
+  [/(印制电路|电路板|PCB)/i,"聚焦高端PCB，受益算力硬件升级"],
+  [/(服务器|算力设备|液冷|数据中心)/,"聚焦算力基础设施，受益AI扩容"],
+  [/(变压器|输变电|电网设备|高压开关)/,"深耕电网设备，受益电网投资提速"],
+  [/(工业机器人|减速器|伺服系统|机器视觉)/,"聚焦机器人核心部件，受益产业放量"],
+  [/(动力电池|锂电池|电池材料|电解液)/,"深耕锂电产业链，受益储能需求增长"],
+  [/(光伏组件|光伏逆变器|太阳能发电)/,"聚焦光伏产业链，受益装机需求增长"],
+  [/(风电整机|风机叶片|海上风电)/,"深耕风电设备，受益海风建设提速"],
+  [/(汽车零部件|汽车电子|智能座舱)/,"聚焦汽车零部件，受益智能化升级"],
+  [/(军工电子|航空装备|航天装备|船舶制造)/,"深耕高端装备，受益国防需求增长"],
+  [/(创新药|生物制药|原料药)/,"聚焦医药研发，受益创新药需求释放"],
+  [/(医疗器械|医学影像|体外诊断)/,"深耕医疗器械，受益国产替代"],
+  [/(黄金采选|金矿|贵金属)/,"聚焦黄金资源，受益金价中枢上行"],
+  [/(铜矿|铝业|稀土|有色金属)/,"深耕资源品，受益供需格局改善"],
+  [/(证券经纪|证券业务|券商)/,"聚焦证券服务，受益资本市场活跃"],
+  [/(银行业务|商业银行)/,"深耕银行主业，受益息差企稳"],
+  [/(煤炭开采|煤矿|焦煤)/,"聚焦煤炭资源，受益高股息价值"],
+  [/(白酒|酒类生产)/,"深耕品牌白酒，受益消费需求修复"],
+];
+function cleanBusiness(value:string){return String(value||"").replace(/[（(].*?(?:补充|其他).*?[）)]/g,"").replace(/其他|补充|合计|主营业务|抵销/g,"").trim()}
+function validProfileItem(item:ProfileItem){return Boolean(cleanBusiness(item.name))&&Number(item.revenueRatio||0)>=.03}
+function cleanConcept(value:string){return value.trim().replace(/概念$/g,"")}
+function validConcept(value:string){return Boolean(value)&&!/(板块|融资|转融|重仓|沪股通|深股通|高送转|预亏|预增|基金|社保|MSCI|富时|其他|补充)/i.test(value)}
+function fitFixedLogic(value:string){return Array.from(value.replace(/受益于/g,"受益").replace(/[。；;]+$/g,"")).slice(0,20).join("").replace(/[，,。；;]+$/g,"")}
+function conceptCatalyst(concepts:string[],industry:string){
+  const signal=`${concepts.join("、")}、${industry}`;
+  if(/AI|算力|CPO|数据中心/i.test(signal))return "AI算力扩容";
+  if(/国产替代|自主可控|信创/.test(signal))return "国产替代";
+  if(/低空经济|无人机/.test(signal))return "低空经济提速";
+  if(/机器人/.test(signal))return "机器人产业放量";
+  if(/储能/.test(signal))return "储能需求增长";
+  if(/新能源车|汽车电子/.test(signal))return "汽车智能化升级";
+  if(/一带一路|出海/.test(signal))return "海外需求增长";
+  const theme=cleanBusiness(concepts[0]||industry||"产业").replace(/行业$/g,"");
+  return `${Array.from(theme).slice(0,6).join("")}需求`;
+}
+function fixedRuleLogic(code:string,profile:StockProfile|null,quote:QuotePayload){
+  if(verifiedRule[code])return verifiedRule[code];
+  const items=[...(profile?.segments||[]),...(profile?.products||[])].filter(validProfileItem);
+  const businesses=[...new Set(items.map(item=>cleanBusiness(item.name)).filter(Boolean))];
+  const industry=cleanBusiness(profile?.industry||quote.industry||"");
+  const concepts=[...new Set(String(quote.concepts||"").split(",").map(cleanConcept).filter(validConcept))];
+  const coreSignal=`${businesses.join("、")}、${industry}`;
+  const matched=businessRules.find(([pattern])=>pattern.test(coreSignal));
+  if(matched)return matched[1];
+  const primary=Array.from(businesses[0]||industry||"核心主业").slice(0,7).join("");
+  const catalyst=conceptCatalyst(concepts,industry);
+  return fitFixedLogic(`聚焦${primary}，受益${catalyst}`);
+}
+
 async function searchStocks(query:string){
   const exact=stockCode(query);if(exact){const suffix=query.trim().toUpperCase().endsWith(".SZ")?"SZ":query.trim().toUpperCase().endsWith(".SH")?"SH":/^[569]/.test(exact)?"SH":"SZ";const secid=`${suffix==="SH"?"1":"0"}.${exact}`;try{const d=await fetchQuote(secid);return[{secid,code:d.code||exact,name:d.name||exact,market:suffix}]}catch{}}
   const r=await fetch(`/api/search?q=${encodeURIComponent(query)}`);if(!r.ok)throw new Error();const d=await r.json() as {results?:Suggestion[]};return d.results||[];
@@ -76,7 +137,19 @@ export function Dashboard({aiMode=false}:{aiMode?:boolean}){
     }catch(error){setSpeechError(error instanceof Error?error.message:"DeepSeek 暂时无法生成，请稍后重试")}
     finally{setSpeechLoading(false)}
   }
-  async function generateSpeech(){if(aiMode){await generateAiSpeech();return}if(!speechSelected)return;setSpeechLoading(true);setSpeechError("");try{const d=await fetchQuote(speechSelected.secid,true);const price=d.price;const market=speechSelected.market;const profile=await fetch(`/api/profile?code=${market}${d.code}`).then(async r=>r.ok?await r.json() as StockProfile:null).catch(()=>null);const cleanName=(x:string)=>String(x||"").replace(/[（(].*?(?:补充|其他).*?[）)]/g,"").trim();const isUseful=(x:{name:string;revenueRatio:number})=>Boolean(cleanName(x.name))&&!/(其他|补充|合计|主营业务)/.test(x.name)&&Number(x.revenueRatio||0)>=.03;const segments=(profile?.segments||[]).filter(isUseful);const products=(profile?.products||[]).filter(isUseful);const rawConcepts=String(d.concepts||"").split(",").map((x:string)=>x.trim().replace(/概念$/,""));const concepts=[...new Set(rawConcepts.filter((x:string)=>x&&!/(板块|融资|转融|重仓|沪股通|深股通|高送转|预亏|预增|基金|社保|MSCI|富时)/.test(x)))];const top=segments[0]||products[0];const second=segments[1]&&segments[1].revenueRatio>=.15?segments[1]:null;const business=[...segments,...products].map(x=>cleanName(x.name)).join("、");const signals=`${business}、${concepts.join("、")}、${profile?.industry||d.industry||""}`;let logic="";if(/(光通信|光模块|光器件|通信器件|光电子)/.test(signals))logic=`深耕${cleanName(top?.name)||"光通信器件"}，受益于AI算力带动高速光模块需求`;else if(/(封装测试|先进封装|半导体|芯片|集成电路)/.test(signals))logic=`聚焦${cleanName(top?.name)||"半导体"}，受益于芯片国产化与先进封装需求`;else if(/(核电|核能)/.test(signals))logic=`深耕${cleanName(top?.name)||"核电产业"}，受益于核电建设与设备更新需求`;else if(/(机器人|减速器|伺服)/.test(signals))logic=`聚焦${cleanName(top?.name)||"智能制造"}，受益于机器人产业加速发展`;else if(/(储能|锂电|新能源车|光伏|风电)/.test(signals))logic=`深耕${cleanName(top?.name)||"新能源"}，受益于新能源产业持续扩容`;else if(top&&second)logic=`${cleanName(top.name)}与${cleanName(second.name)}协同发展，主业结构清晰`;else if(top){const theme=concepts[0];logic=theme?`聚焦${cleanName(top.name)}，受益于${theme}产业发展`:`聚焦${cleanName(top.name)}主业，业务结构清晰`}else logic=`受益于${profile?.industry||d.industry||"行业"}景气改善`;setSpeech(`${d.name}（${d.code}）：${logic}，建仓一成，止损价建议设为${(price*.85).toFixed(2)}元左右`);setSpeechStock({secid:speechSelected.secid,code:d.code,name:d.name,market,price});setSpeechCost(price.toFixed(2));setSpeechQuery(`${d.name}  ${d.code}`)}catch{setSpeechError("暂时无法取得该股票资料，请稍后重试")}finally{setSpeechLoading(false)}}
+  async function generateSpeech(){
+    if(aiMode){await generateAiSpeech();return}
+    if(!speechSelected)return;
+    setSpeechLoading(true);setSpeechError("");
+    try{
+      const d=await fetchQuote(speechSelected.secid,true);const price=d.price;const market=speechSelected.market;
+      const profile=await fetch(`/api/profile?code=${market}${d.code}`).then(async r=>r.ok?await r.json() as StockProfile:null).catch(()=>null);
+      const logic=fixedRuleLogic(d.code,profile,d);
+      setSpeech(`${d.name}（${d.code}）：${logic}，建仓一成，止损价建议设为${(price*.85).toFixed(2)}元左右`);
+      setSpeechStock({secid:speechSelected.secid,code:d.code,name:d.name,market,price});setSpeechCost(price.toFixed(2));setSpeechQuery(`${d.name}  ${d.code}`);
+    }catch{setSpeechError("暂时无法取得该股票资料，请稍后重试")}
+    finally{setSpeechLoading(false)}
+  }
   function copySpeech(){if(speech)navigator.clipboard.writeText(speech)}
   function openSpeechAdd(){if(!speechStock)return;setTargetPortfolio(activeId);setNewPortfolioName("");setSpeechCost(speechStock.price.toFixed(2));setSpeechAddModal(true)}
   function addSpeechStock(){if(!speechStock||Number(speechCost)<=0)return;const holding:Holding={secid:speechStock.secid,code:speechStock.code,name:speechStock.name,market:speechStock.market,cost:Number(speechCost)};if(targetPortfolio==="__new"){const name=newPortfolioName.trim();if(!name)return;const id=`p-${Date.now()}`;setPortfolios(ps=>[...ps,{id,name,holdings:[holding]}]);setActiveId(id)}else{setPortfolios(ps=>ps.map(p=>p.id===targetPortfolio?{...p,holdings:[...p.holdings.filter(h=>h.secid!==holding.secid),holding]}:p));setActiveId(targetPortfolio)}setSpeechAddModal(false);setTimeout(()=>document.getElementById("holdings")?.scrollIntoView({behavior:"smooth"}),80)}
@@ -84,11 +157,11 @@ export function Dashboard({aiMode=false}:{aiMode?:boolean}){
   return <main>
     <header className="topbar"><div className="brand"><span className="brandMark">↗</span><span>鑫汇盈</span></div><div className="market"><i/>A股行情 <span>{loading?"更新中…":`更新于 ${updated}`}</span></div></header>
 
-    <section className={`generator ${aiMode?"aiGenerator":""}`}><div className="generatorCopy"><p className="eyebrow">{aiMode?"XINHUIYING · DEEPSEEK AI":"XINHUIYING SCRIPT"}</p><h1>{aiMode?"鑫汇盈 AI 话术生成器":"鑫汇盈话术生成器"}</h1><p>{aiMode?"结合实时行情、主营构成与 DeepSeek Flash，生成20字以内、更有辨识度的荐股逻辑。":"输入股票名称或代码，即刻生成简洁的买入逻辑与参考止损价。"}</p><nav className="modeSwitch" aria-label="话术生成模式"><a className={!aiMode?"active":""} href="/">固定规则版</a><a className={aiMode?"active":""} href="/ai">DeepSeek 智能版</a></nav></div><div className="generatorPanel">
+    <section className={`generator ${aiMode?"aiGenerator":""}`}><div className="generatorCopy"><p className="eyebrow">{aiMode?"XINHUIYING · DEEPSEEK AI":"XINHUIYING SCRIPT"}</p><h1>{aiMode?"鑫汇盈 AI 话术生成器":"鑫汇盈话术生成器"}</h1><p>{aiMode?"结合实时行情、主营构成与 DeepSeek Flash，生成20字以内、更有辨识度的荐股逻辑。":"输入股票名称或代码，即刻生成简洁的买入逻辑与参考止损价。"}</p></div><div className="generatorPanel">
       <label>股票名称 / 股票代码</label><div className="generatorInput"><span>⌕</span><input value={speechQuery} placeholder="例如：中国核电 / 601985" onChange={e=>{setSpeechQuery(e.target.value);setSpeechSelected(null);setSpeech("")}}/><button disabled={!speechSelected||speechLoading} onClick={generateSpeech}>{speechLoading?"生成中":aiMode?"AI 生成":"生成话术"}</button></div>
       {!!speechSuggestions.length&&<div className="suggestions generatorSuggestions">{speechSuggestions.map(s=><button key={s.secid} onClick={()=>{setSpeechSelected(s);setSpeechQuery(`${s.name}  ${s.code}.${s.market}`);setSpeechSuggestions([])}}><span><b>{s.name}</b><small>{s.code}.{s.market}</small></span><i>选择</i></button>)}</div>}
       {speechError&&<p className="formError">{speechError}</p>}{speech&&<div className="speechResult"><span>{aiMode?(speechCached?"已复用智能缓存 · 未消耗模型 TOKEN":"DEEPSEEK FLASH 智能逻辑已生成"):"智能逻辑已生成"}</span><p>{speech}</p><div className="speechButtons"><button onClick={copySpeech}>复制话术</button><button className="addPosition" onClick={openSpeechAdd}>＋ 加入持仓</button></div></div>}
-      <small className="generatorNote">{aiMode?"荐股逻辑严格控制在20字以内 · 重复个股7天内优先复用缓存 · 止损价始终按最新现价85%计算":"优先读取最新财报主营构成，再结合产品毛利与概念映射 · 止损价按现价 85% 计算"}</small>
+      <small className="generatorNote">{aiMode?"荐股逻辑严格控制在20字以内 · 重复个股7天内优先复用缓存 · 止损价始终按最新现价85%计算":"主营业务优先 · 行业信息其次 · 概念仅作辅助 · 止损价按最新现价85%计算"}</small>
     </div></section>
 
     <div className="sectionDivider"><span>PORTFOLIO</span></div>

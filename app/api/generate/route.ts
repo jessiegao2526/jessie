@@ -77,6 +77,7 @@ async function requestLogic(apiKey:string,model:string,stock:{name:string;code:s
 }
 
 export async function POST(request:Request){
+  if(request.headers.get("x-xinhuiying-ai-site")!=="1")return json({error:"not found"},404);
   let body:GenerateInput;
   try{body=await request.json() as GenerateInput}catch{return json({error:"请求格式不正确"},400)}
   const name=text(body.name,20);const code=text(body.code,6);const price=number(body.price);
