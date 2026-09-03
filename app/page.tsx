@@ -74,11 +74,11 @@ export function Dashboard({aiMode=false}:{aiMode?:boolean}){
   return <main>
     <header className="topbar"><div className="brand"><span className="brandMark">↗</span><span>鑫汇盈</span></div><div className="market"><i/>A股行情 <span>{loading?"更新中…":`更新于 ${updated}`}</span></div></header>
 
-    <section className={`generator ${aiMode?"aiGenerator":""}`}><div className="generatorCopy"><p className="eyebrow">{aiMode?"XINHUIYING · DEEPSEEK AI":"XINHUIYING SCRIPT"}</p><h1>{aiMode?"鑫汇盈 AI 话术生成器":"鑫汇盈话术生成器"}</h1><p>{aiMode?"结合实时行情、主营构成与 DeepSeek，让每只股票的逻辑更自然、更贴近企业。":"输入股票名称或代码，即刻生成简洁的买入逻辑与参考止损价。"}</p><nav className="modeSwitch" aria-label="话术生成模式"><a className={!aiMode?"active":""} href="/">固定规则版</a><a className={aiMode?"active":""} href="/ai">DeepSeek 智能版</a></nav></div><div className="generatorPanel">
+    <section className={`generator ${aiMode?"aiGenerator":""}`}><div className="generatorCopy"><p className="eyebrow">{aiMode?"XINHUIYING · DEEPSEEK AI":"XINHUIYING SCRIPT"}</p><h1>{aiMode?"鑫汇盈 AI 话术生成器":"鑫汇盈话术生成器"}</h1><p>{aiMode?"结合实时行情、主营构成与 DeepSeek Pro，生成20字以内、更有辨识度的荐股逻辑。":"输入股票名称或代码，即刻生成简洁的买入逻辑与参考止损价。"}</p><nav className="modeSwitch" aria-label="话术生成模式"><a className={!aiMode?"active":""} href="/">固定规则版</a><a className={aiMode?"active":""} href="/ai">DeepSeek 智能版</a></nav></div><div className="generatorPanel">
       <label>股票名称 / 股票代码</label><div className="generatorInput"><span>⌕</span><input value={speechQuery} placeholder="例如：中国核电 / 601985" onChange={e=>{setSpeechQuery(e.target.value);setSpeechSelected(null);setSpeech("")}}/><button disabled={!speechSelected||speechLoading} onClick={generateSpeech}>{speechLoading?"生成中":aiMode?"AI 生成":"生成话术"}</button></div>
       {!!speechSuggestions.length&&<div className="suggestions generatorSuggestions">{speechSuggestions.map(s=><button key={s.secid} onClick={()=>{setSpeechSelected(s);setSpeechQuery(`${s.name}  ${s.code}.${s.market}`);setSpeechSuggestions([])}}><span><b>{s.name}</b><small>{s.code}.{s.market}</small></span><i>选择</i></button>)}</div>}
       {speechError&&<p className="formError">{speechError}</p>}{speech&&<div className="speechResult"><span>{aiMode?"DEEPSEEK 智能逻辑已生成":"智能逻辑已生成"}</span><p>{speech}</p><div className="speechButtons"><button onClick={copySpeech}>复制话术</button><button className="addPosition" onClick={openSpeechAdd}>＋ 加入持仓</button></div></div>}
-      <small className="generatorNote">{aiMode?"AI 根据实时行情与最新主营资料生成 · 止损价仍按现价 85% 精确计算":"优先读取最新财报主营构成，再结合产品毛利与概念映射 · 止损价按现价 85% 计算"}</small>
+      <small className="generatorNote">{aiMode?"荐股逻辑严格控制在20字以内 · 建仓一成不变 · 止损价按现价85%计算":"优先读取最新财报主营构成，再结合产品毛利与概念映射 · 止损价按现价 85% 计算"}</small>
     </div></section>
 
     <div className="sectionDivider"><span>PORTFOLIO</span></div>
