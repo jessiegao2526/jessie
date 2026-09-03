@@ -1,11 +1,13 @@
 # 鑫汇盈股票看板
 
-## 双站点部署
+## 三入口部署
 
-- 腾讯云独立站：固定规则话术生成器与持仓看板，不加载或展示 DeepSeek 功能。
-- Cloudflare Workers 独立站：DeepSeek Flash 智能话术生成器，仅作为个人入口使用。
+- 腾讯云普通版 `/`：普通话术生成器与持仓看板，页面不展示“固定规则”字样。
+- 腾讯云智能版 `/ai`：DeepSeek Flash 智能话术生成器与持仓看板。
+- 腾讯云双模式版 `/all`：同一页面可在普通话术与 DeepSeek 智能话术之间切换。
+- Cloudflare Workers 仍保留为备用的 DeepSeek 独立入口。
 
-两站共用行情、企业主营资料和界面代码，但 AI 页面与生成接口只在 Cloudflare Worker 入口开放；DeepSeek API Key 必须使用 Worker Secret 或服务器环境变量配置，禁止提交到 GitHub。
+各入口共用行情、企业主营资料和持仓界面代码；DeepSeek API Key 必须使用 Worker Secret 或腾讯云服务器环境变量配置，禁止提交到 GitHub。
 
 一个面向 A 股的轻量持仓看板，包含智能话术生成器、多自选组合、股票代码与名称自动匹配、实时行情及当日涨幅展示。
 
