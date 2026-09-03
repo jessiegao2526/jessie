@@ -9,11 +9,19 @@ type Suggestion={secid:string;code:string;name:string;market:string};
 type QuotePayload={secid:string;code:string;name:string;price:number;prevClose:number;changePct:number;industry?:string;concepts?:string;time:string};
 type ProfileItem={name:string;revenueRatio:number;grossMargin:number};
 type StockProfile={industry?:string;segments?:ProfileItem[];products?:ProfileItem[]};
+type AiGenerateInput={name:string;code:string;price:number;industry:string;concepts:string[];segments:ProfileItem[];products:ProfileItem[]};
+type AiCacheEntry={logic:string;expiresAt:number};
 
 const seed:Portfolio[]=[{id:"default",name:"默认组合",holdings:[{secid:"1.601985",code:"601985",name:"中国核电",market:"SH",cost:8.9}]}];
 const money=(n:number)=>new Intl.NumberFormat("zh-CN",{style:"currency",currency:"CNY",minimumFractionDigits:2}).format(n);
 const signed=(n:number)=>`${n>0?"+":n<0?"−":""}${Math.abs(n).toFixed(2)}%`;
 const stockCode=(value:string)=>value.trim().toUpperCase().match(/^(\d{6})(?:\.(SH|SZ))?$/)?.[1]||null;
+const AI_BROWSER_CACHE_MS=7*24*60*60*1000;
+function aiCacheKey(input:AiGenerateInput){
+  const source=JSON.stringify({v:2,code:input.code,industry:input.industry,concepts:[...input.concepts].sort(),segments:input.segments.map(x=>x.name),products:input.products.map(x=>x.name)});
+  let hash=2166136261;for(let i=0;i<source.length;i+=1){hash^=source.charCodeAt(i);hash=Math.imul(hash,16777619)}
+  return `xinhuiying-ai:${input.code}:${(hash>>>0).toString(36)}`;
+}
 
 async function searchStocks(query:string){
   const exact=stockCode(query);if(exact){const suffix=query.trim().toUpperCase().endsWith(".SZ")?"SZ":query.trim().toUpperCase().endsWith(".SH")?"SH":/^[569]/.test(exact)?"SH":"SZ";const secid=`${suffix==="SH"?"1":"0"}.${exact}`;try{const d=await fetchQuote(secid);return[{secid,code:d.code||exact,name:d.name||exact,market:suffix}]}catch{}}
@@ -29,7 +37,7 @@ export function Dashboard({aiMode=false}:{aiMode?:boolean}){
   const[quotes,setQuotes]=useState<Record<string,Quote>>({});const[loading,setLoading]=useState(false);const[updated,setUpdated]=useState("正在连接行情");const[error,setError]=useState("");
   const[holdingModal,setHoldingModal]=useState(false);const[groupModal,setGroupModal]=useState<"new"|"rename"|null>(null);const[groupName,setGroupName]=useState("");
   const[query,setQuery]=useState("");const[suggestions,setSuggestions]=useState<Suggestion[]>([]);const[selected,setSelected]=useState<Suggestion|null>(null);const[cost,setCost]=useState("");
-  const[speechQuery,setSpeechQuery]=useState("");const[speechSuggestions,setSpeechSuggestions]=useState<Suggestion[]>([]);const[speechSelected,setSpeechSelected]=useState<Suggestion|null>(null);const[speech,setSpeech]=useState("");const[speechLoading,setSpeechLoading]=useState(false);const[speechError,setSpeechError]=useState("");
+  const[speechQuery,setSpeechQuery]=useState("");const[speechSuggestions,setSpeechSuggestions]=useState<Suggestion[]>([]);const[speechSelected,setSpeechSelected]=useState<Suggestion|null>(null);const[speech,setSpeech]=useState("");const[speechLoading,setSpeechLoading]=useState(false);const[speechError,setSpeechError]=useState("");const[speechCached,setSpeechCached]=useState(false);
   const[speechStock,setSpeechStock]=useState<(Suggestion&{price:number})|null>(null);const[speechAddModal,setSpeechAddModal]=useState(false);const[targetPortfolio,setTargetPortfolio]=useState("default");const[newPortfolioName,setNewPortfolioName]=useState("");const[speechCost,setSpeechCost]=useState("");
   const active=portfolios.find(p=>p.id===activeId)||portfolios[0];const holdings=active?.holdings||[];
 
@@ -51,17 +59,19 @@ export function Dashboard({aiMode=false}:{aiMode?:boolean}){
   function deleteGroup(){if(portfolios.length<=1)return;const next=portfolios.filter(p=>p.id!==activeId);setPortfolios(next);setActiveId(next[0].id)}
   async function generateAiSpeech(){
     if(!speechSelected)return;
-    setSpeechLoading(true);setSpeechError("");
+    setSpeechLoading(true);setSpeechError("");setSpeechCached(false);
     try{
       const d=await fetchQuote(speechSelected.secid,true);const price=d.price;const market=speechSelected.market;
       const profile=await fetch(`/api/profile?code=${market}${d.code}`).then(async r=>r.ok?await r.json() as StockProfile:null).catch(()=>null);
       const clean=(x:ProfileItem)=>String(x.name||"").replace(/[（(].*?(?:补充|其他).*?[）)]/g,"").trim();
       const useful=(x:ProfileItem)=>Boolean(clean(x))&&!/(其他|补充|合计|主营业务|抵销)/.test(x.name)&&Number(x.revenueRatio||0)>=.03;
       const concepts=[...new Set(String(d.concepts||"").split(",").map(x=>x.trim().replace(/概念$/,""))).values()].filter(x=>x&&!/(板块|融资|转融|重仓|沪股通|深股通|高送转|预亏|预增|基金|社保|MSCI|富时)/.test(x));
-      const response=await fetch("/api/generate",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({name:d.name,code:d.code,price,industry:profile?.industry||d.industry||"",concepts,segments:(profile?.segments||[]).filter(useful).slice(0,5),products:(profile?.products||[]).filter(useful).slice(0,5)})});
-      const result=await response.json() as {logic?:string;error?:string};
-      if(!response.ok||!result.logic)throw new Error(result.error||"AI 暂时无法生成，请稍后重试");
-      setSpeech(`${d.name}（${d.code}）：${result.logic}，建仓一成，止损价建议设为${(price*.85).toFixed(2)}元左右`);
+      const aiInput:AiGenerateInput={name:d.name,code:d.code,price,industry:profile?.industry||d.industry||"",concepts,segments:(profile?.segments||[]).filter(useful).slice(0,5),products:(profile?.products||[]).filter(useful).slice(0,5)};
+      const cacheKey=aiCacheKey(aiInput);let result:{logic?:string;error?:string;cached?:boolean}|null=null;
+      try{const saved=localStorage.getItem(cacheKey);if(saved){const entry=JSON.parse(saved) as AiCacheEntry;if(entry.logic&&entry.expiresAt>Date.now())result={logic:entry.logic,cached:true};else localStorage.removeItem(cacheKey)}}catch{}
+      if(!result){const response=await fetch("/api/generate",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(aiInput)});result=await response.json() as {logic?:string;error?:string;cached?:boolean};if(!response.ok||!result.logic)throw new Error(result.error||"AI 暂时无法生成，请稍后重试");try{localStorage.setItem(cacheKey,JSON.stringify({logic:result.logic,expiresAt:Date.now()+AI_BROWSER_CACHE_MS}))}catch{}}
+      if(!result.logic)throw new Error(result.error||"AI 暂时无法生成，请稍后重试");
+      setSpeech(`${d.name}（${d.code}）：${result.logic}，建仓一成，止损价建议设为${(price*.85).toFixed(2)}元左右`);setSpeechCached(Boolean(result.cached));
       setSpeechStock({secid:speechSelected.secid,code:d.code,name:d.name,market,price});setSpeechCost(price.toFixed(2));setSpeechQuery(`${d.name}  ${d.code}`);
     }catch(error){setSpeechError(error instanceof Error?error.message:"DeepSeek 暂时无法生成，请稍后重试")}
     finally{setSpeechLoading(false)}
@@ -74,11 +84,11 @@ export function Dashboard({aiMode=false}:{aiMode?:boolean}){
   return <main>
     <header className="topbar"><div className="brand"><span className="brandMark">↗</span><span>鑫汇盈</span></div><div className="market"><i/>A股行情 <span>{loading?"更新中…":`更新于 ${updated}`}</span></div></header>
 
-    <section className={`generator ${aiMode?"aiGenerator":""}`}><div className="generatorCopy"><p className="eyebrow">{aiMode?"XINHUIYING · DEEPSEEK AI":"XINHUIYING SCRIPT"}</p><h1>{aiMode?"鑫汇盈 AI 话术生成器":"鑫汇盈话术生成器"}</h1><p>{aiMode?"结合实时行情、主营构成与 DeepSeek Pro，生成20字以内、更有辨识度的荐股逻辑。":"输入股票名称或代码，即刻生成简洁的买入逻辑与参考止损价。"}</p><nav className="modeSwitch" aria-label="话术生成模式"><a className={!aiMode?"active":""} href="/">固定规则版</a><a className={aiMode?"active":""} href="/ai">DeepSeek 智能版</a></nav></div><div className="generatorPanel">
+    <section className={`generator ${aiMode?"aiGenerator":""}`}><div className="generatorCopy"><p className="eyebrow">{aiMode?"XINHUIYING · DEEPSEEK AI":"XINHUIYING SCRIPT"}</p><h1>{aiMode?"鑫汇盈 AI 话术生成器":"鑫汇盈话术生成器"}</h1><p>{aiMode?"结合实时行情、主营构成与 DeepSeek Flash，生成20字以内、更有辨识度的荐股逻辑。":"输入股票名称或代码，即刻生成简洁的买入逻辑与参考止损价。"}</p><nav className="modeSwitch" aria-label="话术生成模式"><a className={!aiMode?"active":""} href="/">固定规则版</a><a className={aiMode?"active":""} href="/ai">DeepSeek 智能版</a></nav></div><div className="generatorPanel">
       <label>股票名称 / 股票代码</label><div className="generatorInput"><span>⌕</span><input value={speechQuery} placeholder="例如：中国核电 / 601985" onChange={e=>{setSpeechQuery(e.target.value);setSpeechSelected(null);setSpeech("")}}/><button disabled={!speechSelected||speechLoading} onClick={generateSpeech}>{speechLoading?"生成中":aiMode?"AI 生成":"生成话术"}</button></div>
       {!!speechSuggestions.length&&<div className="suggestions generatorSuggestions">{speechSuggestions.map(s=><button key={s.secid} onClick={()=>{setSpeechSelected(s);setSpeechQuery(`${s.name}  ${s.code}.${s.market}`);setSpeechSuggestions([])}}><span><b>{s.name}</b><small>{s.code}.{s.market}</small></span><i>选择</i></button>)}</div>}
-      {speechError&&<p className="formError">{speechError}</p>}{speech&&<div className="speechResult"><span>{aiMode?"DEEPSEEK 智能逻辑已生成":"智能逻辑已生成"}</span><p>{speech}</p><div className="speechButtons"><button onClick={copySpeech}>复制话术</button><button className="addPosition" onClick={openSpeechAdd}>＋ 加入持仓</button></div></div>}
-      <small className="generatorNote">{aiMode?"荐股逻辑严格控制在20字以内 · 建仓一成不变 · 止损价按现价85%计算":"优先读取最新财报主营构成，再结合产品毛利与概念映射 · 止损价按现价 85% 计算"}</small>
+      {speechError&&<p className="formError">{speechError}</p>}{speech&&<div className="speechResult"><span>{aiMode?(speechCached?"已复用智能缓存 · 未消耗模型 TOKEN":"DEEPSEEK FLASH 智能逻辑已生成"):"智能逻辑已生成"}</span><p>{speech}</p><div className="speechButtons"><button onClick={copySpeech}>复制话术</button><button className="addPosition" onClick={openSpeechAdd}>＋ 加入持仓</button></div></div>}
+      <small className="generatorNote">{aiMode?"荐股逻辑严格控制在20字以内 · 重复个股7天内优先复用缓存 · 止损价始终按最新现价85%计算":"优先读取最新财报主营构成，再结合产品毛利与概念映射 · 止损价按现价 85% 计算"}</small>
     </div></section>
 
     <div className="sectionDivider"><span>PORTFOLIO</span></div>
