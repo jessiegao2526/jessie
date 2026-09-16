@@ -31,11 +31,13 @@ function aiCacheKey(input:AiGenerateInput){
 }
 
 const verifiedRule:Record<string,string>={
+  "002338":"深耕光电测控仪器，受益高端装备需求",
   "300394":"光器件领先，受益AI算力扩容",
   "600667":"洁净室工程领先，受益晶圆厂扩产",
   "601985":"核电运营龙头，受益核准提速",
 };
 const businessRules:Array<[RegExp,string]>=[
+  [/(光学仪器|光电测控|光栅传感|精密光机电)/,"深耕光电测控仪器，受益高端装备需求"],
   [/(洁净室|洁净工程|电子工程|晶圆厂工程)/,"洁净室工程领先，受益晶圆厂扩产"],
   [/(光模块|光器件|光通信|光电子)/,"深耕光通信器件，受益AI算力扩容"],
   [/(核电运营|核能发电|核电发电)/,"聚焦核电运营，受益机组核准提速"],
@@ -60,11 +62,11 @@ const businessRules:Array<[RegExp,string]>=[
   [/(煤炭开采|煤矿|焦煤)/,"聚焦煤炭资源，受益高股息价值"],
   [/(白酒|酒类生产)/,"深耕品牌白酒，受益消费需求修复"],
 ];
-function cleanBusiness(value:string){return String(value||"").replace(/[（(].*?(?:补充|其他).*?[）)]/g,"").replace(/其他|补充|合计|主营业务|抵销/g,"").trim()}
+function cleanBusiness(value:string){return String(value||"").replace(/[（(].*?(?:补充|其他).*?[）)]/g,"").replace(/其他|补充|合计|主营业务|抵销/g,"").replace(/[－—–-]+/g," ").replace(/[\\/|>]+/g," ").replace(/\s+/g," ").trim()}
 function validProfileItem(item:ProfileItem){return Boolean(cleanBusiness(item.name))&&Number(item.revenueRatio||0)>=.03}
 function cleanConcept(value:string){return value.trim().replace(/概念$/g,"")}
 function validConcept(value:string){return Boolean(value)&&!/(板块|融资|转融|重仓|沪股通|深股通|高送转|预亏|预增|基金|社保|MSCI|富时|其他|补充)/i.test(value)}
-function fitFixedLogic(value:string){return Array.from(value.replace(/受益于/g,"受益").replace(/[。；;]+$/g,"")).slice(0,20).join("").replace(/[，,。；;]+$/g,"")}
+function fitFixedLogic(value:string){return Array.from(value.replace(/受益于/g,"受益").replace(/[－—–_\\/|>-]+/g,"").replace(/[。；;]+$/g,"")).slice(0,20).join("").replace(/[，,。；;]+$/g,"")}
 function conceptCatalyst(concepts:string[],industry:string){
   const signal=`${concepts.join("、")}、${industry}`;
   if(/AI|算力|CPO|数据中心/i.test(signal))return "AI算力扩容";
@@ -74,7 +76,9 @@ function conceptCatalyst(concepts:string[],industry:string){
   if(/储能/.test(signal))return "储能需求增长";
   if(/新能源车|汽车电子/.test(signal))return "汽车智能化升级";
   if(/一带一路|出海/.test(signal))return "海外需求增长";
-  const theme=cleanBusiness(concepts[0]||industry||"产业").replace(/行业$/g,"");
+  const hierarchy=cleanBusiness(concepts[0]||industry||"产业").replace(/行业$/g,"").split(/\s+/).filter(Boolean);
+  const candidate=hierarchy.at(-1)||"产业";
+  const theme=/^(机械设备|通用设备|专用设备|电器仪表|仪器仪表|综合)$/.test(candidate)?"产业升级":candidate;
   return `${Array.from(theme).slice(0,6).join("")}需求`;
 }
 function fixedRuleLogic(code:string,profile:StockProfile|null,quote:QuotePayload){

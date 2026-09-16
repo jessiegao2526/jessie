@@ -40,6 +40,7 @@ function normalizeLogic(value:unknown){
     .replace(/概念概念/g,"概念")
     .replace(/行业景气(?:度)?(?:持续)?(?:提升|改善)/g,"产业需求增长")
     .replace(/双轮驱动|协同发展|盈利质量高/g,"")
+    .replace(/[－—–_\\/|>-]+/g,"")
     .replace(/，{2,}/g,"，")
     .replace(/^，|，$/g,"");
   if(Array.from(logic).length>20)logic=logic.replace(/持续|有望|明显|加速发展|产业发展|市场需求/g,"");
