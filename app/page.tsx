@@ -25,7 +25,7 @@ const signed=(n:number)=>`${n>0?"+":n<0?"−":""}${Math.abs(n).toFixed(2)}%`;
 const stockCode=(value:string)=>value.trim().toUpperCase().match(/^(\d{6})(?:\.(SH|SZ))?$/)?.[1]||null;
 const AI_BROWSER_CACHE_MS=7*24*60*60*1000;
 function aiCacheKey(input:AiGenerateInput){
-  const source=JSON.stringify({v:2,code:input.code,industry:input.industry,concepts:[...input.concepts].sort(),segments:input.segments.map(x=>x.name),products:input.products.map(x=>x.name)});
+  const source=JSON.stringify({v:3,code:input.code,industry:input.industry,concepts:[...input.concepts].sort(),segments:input.segments.map(x=>x.name),products:input.products.map(x=>x.name)});
   let hash=2166136261;for(let i=0;i<source.length;i+=1){hash^=source.charCodeAt(i);hash=Math.imul(hash,16777619)}
   return `xinhuiying-ai:${input.code}:${(hash>>>0).toString(36)}`;
 }
