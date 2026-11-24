@@ -22,6 +22,7 @@ function isLegacyDemoPortfolio(value:unknown){
 }
 const money=(n:number)=>new Intl.NumberFormat("zh-CN",{style:"currency",currency:"CNY",minimumFractionDigits:2}).format(n);
 const signed=(n:number)=>`${n>0?"+":n<0?"−":""}${Math.abs(n).toFixed(2)}%`;
+const stopLossRange=(price:number)=>`${(price*.85).toFixed(1)}～${(price*.84).toFixed(1)}`;
 const stockCode=(value:string)=>value.trim().toUpperCase().match(/^(\d{6})(?:\.(SH|SZ))?$/)?.[1]||null;
 const AI_BROWSER_CACHE_MS=7*24*60*60*1000;
 function aiCacheKey(input:AiGenerateInput){
@@ -146,7 +147,7 @@ export function Dashboard({aiMode=false,allowModeSwitch=false}:{aiMode?:boolean;
       try{const saved=localStorage.getItem(cacheKey);if(saved){const entry=JSON.parse(saved) as AiCacheEntry;if(entry.logic&&entry.expiresAt>Date.now())result={logic:entry.logic,cached:true};else localStorage.removeItem(cacheKey)}}catch{}
       if(!result){const response=await fetch("/api/generate",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(aiInput)});result=await response.json() as {logic?:string;error?:string;cached?:boolean};if(!response.ok||!result.logic)throw new Error(result.error||"AI 暂时无法生成，请稍后重试");try{localStorage.setItem(cacheKey,JSON.stringify({logic:result.logic,expiresAt:Date.now()+AI_BROWSER_CACHE_MS}))}catch{}}
       if(!result.logic)throw new Error(result.error||"AI 暂时无法生成，请稍后重试");
-      setSpeech(`${d.name}（${d.code}）：${result.logic}，建仓一成，止损价建议设为${(price*.85).toFixed(2)}元左右`);setSpeechCached(Boolean(result.cached));
+      setSpeech(`${d.name}（${d.code}）：${result.logic}，建仓一成，止损价建议设为${stopLossRange(price)}元左右`);setSpeechCached(Boolean(result.cached));
       setSpeechStock({secid:speechSelected.secid,code:d.code,name:d.name,market,price});setSpeechCost(price.toFixed(2));setSpeechQuery(`${d.name}  ${d.code}`);
     }catch(error){setSpeechError(error instanceof Error?error.message:"DeepSeek 暂时无法生成，请稍后重试")}
     finally{setSpeechLoading(false)}
@@ -159,7 +160,7 @@ export function Dashboard({aiMode=false,allowModeSwitch=false}:{aiMode?:boolean;
       const d=await fetchQuote(speechSelected.secid,true);const price=d.price;const market=speechSelected.market;
       const profile=await fetch(`/api/profile?code=${market}${d.code}`).then(async r=>r.ok?await r.json() as StockProfile:null).catch(()=>null);
       const logic=fixedRuleLogic(d.code,profile,d);
-      setSpeech(`${d.name}（${d.code}）：${logic}，建仓一成，止损价建议设为${(price*.85).toFixed(2)}元左右`);
+      setSpeech(`${d.name}（${d.code}）：${logic}，建仓一成，止损价建议设为${stopLossRange(price)}元左右`);
       setSpeechStock({secid:speechSelected.secid,code:d.code,name:d.name,market,price});setSpeechCost(price.toFixed(2));setSpeechQuery(`${d.name}  ${d.code}`);
     }catch{setSpeechError("暂时无法取得该股票资料，请稍后重试")}
     finally{setSpeechLoading(false)}
@@ -191,7 +192,7 @@ export function Dashboard({aiMode=false,allowModeSwitch=false}:{aiMode?:boolean;
       <label>股票名称 / 股票代码</label><div className="generatorInput"><span>⌕</span><input value={speechQuery} placeholder="输入名称或6位股票代码" onChange={e=>{setSpeechQuery(e.target.value);setSpeechSelected(null);setSpeech("");setCopyLabel("复制话术")}}/><button disabled={!speechSelected||speechLoading} onClick={generateSpeech}>{speechLoading?"生成中":activeAiMode?"AI 生成":"生成话术"}</button></div>
       {!!speechSuggestions.length&&<div className="suggestions generatorSuggestions">{speechSuggestions.map(s=><button key={s.secid} onClick={()=>{setSpeechSelected(s);setSpeechQuery(`${s.name}  ${s.code}.${s.market}`);setSpeechSuggestions([])}}><span><b>{s.name}</b><small>{s.code}.{s.market}</small></span><i>选择</i></button>)}</div>}
       {speechError&&<p className="formError">{speechError}</p>}{speech&&<div className="speechResult"><span>{activeAiMode?(speechCached?"已复用智能缓存 · 未消耗模型 TOKEN":"DEEPSEEK FLASH 智能逻辑已生成"):"智能逻辑已生成"}</span><p>{speech}</p><div className="speechButtons"><button onClick={copySpeech}>{copyLabel}</button><button className="addPosition" onClick={openSpeechAdd}>＋ 加入持仓</button></div></div>}
-      <small className="generatorNote">{activeAiMode?"荐股逻辑严格控制在20字以内 · 重复个股7天内优先复用缓存 · 止损价始终按最新现价85%计算":"主营业务优先 · 行业信息其次 · 概念仅作辅助 · 止损价按最新现价85%计算"}</small>
+      <small className="generatorNote">{activeAiMode?"荐股逻辑严格控制在20字以内 · 重复个股7天内优先复用缓存 · 止损区间按现价85%～84%计算并保留1位小数":"主营业务优先 · 行业信息其次 · 概念仅作辅助 · 止损区间按现价85%～84%计算并保留1位小数"}</small>
     </div></section>
 
     <div className="sectionDivider"><span>PORTFOLIO</span></div>
